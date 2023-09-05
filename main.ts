@@ -1,112 +1,71 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import costflow from 'costflow';
-import { NParseResult, UserConfig } from 'costflow/lib/interface';
+import { App, Editor, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import Ledger from 'ledger';
 
-const config: UserConfig = {
-	mode: "beancount",
+interface ExpenseTrackerSettings {
+	ledgerFolder: string;
+	refreshInterval: number;
+	currency: string;
+	timezone: string;
+	accounts: string;
+}
+
+const DEFAULT_SETTINGS: ExpenseTrackerSettings = {
+	ledgerFolder: '',
+	refreshInterval: 15,
 	currency: "PHP",
 	timezone: "Asia/Manila",
-	account: {
-		visa: "Liabilities:Visa",
-		music: "Expenses:Music",
-	},
-	formula: {
-		spotify: "@Spotify #music 15.98 USD visa > music",
-	},
-};
-
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+	accounts: "start = Equity:Starting Balance\ncash = Assets:Cash\nsavings = Assets:Debit Card\nfood = Expenses:Needs:Food\nrent = Expenses:Needs:Bills\nstreaming = Expenses:Wants:Bills\ncc = Liabilities:Credit Card\nwages = Income:Salary"
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class ExpenseTracker extends Plugin {
+	settings: ExpenseTrackerSettings;
+	ledger: Ledger;
 
 	async onload() {
 		await this.loadSettings();
+		this.ledger = new Ledger(
+			this.settings.currency,
+			this.settings.timezone,
+			this.parseStrToRecord(this.settings.accounts)
+		);
 
 		this.addCommand({
-			id: 'test-costflow',
-			name: 'DEBUG Test Costflow',
+			id: 'refresh-ledger',
+			name: 'Manually Refresh the Ledger',
 			editorCallback: async (editor: Editor) => {
-				const line = editor.getLine(editor.getCursor().line);
-				const parsed = <NParseResult.Result>await costflow.parse(line, config);
-				//new Notice(JSON.stringify(parsed.data));
-				editor.replaceRange("\n\n---\n" + parsed.output as string, editor.getCursor())
-				editor.setCursor(editor.lastLine());
+				this.refreshLedger();
 			}
 		});
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		this.addSettingTab(new ExpenseTrackerSettingsTab(this.app, this));
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.registerInterval(window.setInterval(
+			() => this.refreshLedger(),
+			this.settings.refreshInterval * 1000));
 	}
 
 	onunload() {
+		this.ledger.flush();
+	}
 
+	async refreshLedger() {
+		const { vault } = this.app;
+		let filteredFiles: TFile[] = [];
+		vault.getMarkdownFiles().forEach(file => {
+			if (file.path.startsWith(this.settings.ledgerFolder)) {
+				filteredFiles.push(file);
+			}
+		});
+		const fileContents: string[] = await Promise.all(
+			filteredFiles.map((file) => vault.cachedRead(file))
+		);
+
+		this.ledger.flush();
+		fileContents.forEach((content) => {
+			this.ledger.parseFiles(this.filterMarkdown(content));
+		});
+
+		console.log(this.ledger.journalEntries);
 	}
 
 	async loadSettings() {
@@ -116,46 +75,105 @@ export default class MyPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	parseStrToRecord(input: string): Record<string, string> {
+		const lines = input.split("\n"); // Split the input on newline characters to get an array of lines
+		const record: Record<string, string> = {}; // Initialize an empty object
+
+		lines.forEach(line => { // Process each line
+			const [key, value] = line.split(" = "); // Split the line on " = " to get the key and value
+			record[key] = value; // Assign the value to the corresponding key in the object
+		});
+
+		return record; // Return the resulting object
+	}
+
+	filterMarkdown(markdown: string): string[] {
+		// Declare regex matching markdown list item starting with date, followed by the > symbol somewhere afterwards
+		const regex = /^[-*]\s(\d{4}-\d{2}-\d{2}).*(>).*$/gm;
+
+		// Split markdown content into lines
+		const lines = markdown.split('\n');
+
+		// Filter lines based on regex
+		let filteredLines: string[] = [];
+		lines.filter(line => {
+			const matchValue = !!line.match(regex);
+			// If there is a match, remove the first "-", then trim whitespace
+			if (matchValue) {
+				filteredLines.push(line.trim().replace(/^-/, "").trim());
+			}
+		});
+
+		return filteredLines;
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class ExpenseTrackerSettingsTab extends PluginSettingTab {
+	plugin: ExpenseTracker;
 
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: ExpenseTracker) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
 		const { containerEl } = this;
-
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName("Ledger Folder")
+			.setDesc("A folder in your vault that contains the ledgers that will be processed")
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder(DEFAULT_SETTINGS.ledgerFolder)
+				.setValue(this.plugin.settings.ledgerFolder)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
+					this.plugin.settings.ledgerFolder = value;
+					await this.plugin.saveSettings()
+				}));
+
+		new Setting(containerEl)
+			.setName("Refresh Interval")
+			.setDesc("Number of seconds before your vault is scanned and its ledgers processed. (Requires Obsidian reboot)")
+			.addSlider(slider => slider
+				.setDynamicTooltip()
+				.setLimits(3, 30, 1)
+				.setValue(this.plugin.settings.refreshInterval)
+				.onChange(async (value) => {
+					this.plugin.settings.refreshInterval = value;
+					await this.plugin.saveSettings()
+				}));
+
+		new Setting(containerEl)
+			.setName("Currency")
+			.setDesc("The currency that will be used on the ledgers. Can be a symbol (₱) or a code (PHP)")
+			.addText(text => text
+				.setPlaceholder(DEFAULT_SETTINGS.currency)
+				.setValue(this.plugin.settings.currency)
+				.onChange(async (value) => {
+					this.plugin.settings.currency = value;
+					await this.plugin.saveSettings()
+				}));
+
+		new Setting(containerEl)
+			.setName("Timezone")
+			.setDesc("The timezone to use when processing dates")
+			.addText(text => text
+				.setPlaceholder(DEFAULT_SETTINGS.timezone)
+				.setValue(this.plugin.settings.timezone)
+				.onChange(async (value) => {
+					this.plugin.settings.timezone = value;
+					await this.plugin.saveSettings()
+				}));
+
+		new Setting(containerEl)
+			.setName("Account Aliases")
+			.setDesc("A list of aliases to use as shorthand for accounts")
+			.addTextArea(text => text
+				.setValue(this.plugin.settings.accounts)
+				.onChange(async (value) => {
+					this.plugin.settings.accounts = value;
+					await this.plugin.saveSettings()
 				}));
 	}
 }
