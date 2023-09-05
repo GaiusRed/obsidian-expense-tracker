@@ -1,4 +1,4 @@
-import { App, Editor, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, Editor, Modal, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import Ledger from 'ledger';
 
 interface ExpenseTrackerSettings {
@@ -33,7 +33,18 @@ export default class ExpenseTracker extends Plugin {
 			id: 'refresh-ledger',
 			name: 'Manually Refresh the Ledger',
 			callback: async () => {
-				this.refreshLedger();
+				await this.refreshLedger();
+			}
+		});
+
+		this.addCommand({
+			id: 'export-ledger',
+			name: 'Export the Ledger to Current File',
+			editorCallback: async (editor: Editor) => {
+				await this.refreshLedger();
+				new ExportModal(this.app, (startDate: Date, endDate: Date) => {
+					editor.replaceRange(this.ledger.export(startDate, endDate), editor.getCursor());
+				}).open();
 			}
 		});
 
@@ -59,12 +70,10 @@ export default class ExpenseTracker extends Plugin {
 		const fileContents: string[] = await Promise.all(
 			filteredFiles.map((file) => vault.cachedRead(file))
 		);
-
 		this.ledger.flush();
 		fileContents.forEach((content) => {
 			this.ledger.parseFiles(this.filterMarkdown(content));
 		});
-
 		console.log(this.ledger.journalEntries);
 	}
 
@@ -90,7 +99,7 @@ export default class ExpenseTracker extends Plugin {
 
 	filterMarkdown(markdown: string): string[] {
 		// Declare regex matching markdown list item starting with date, followed by the > symbol somewhere afterwards
-		const regex = /^[-*]\s(\d{4}-\d{2}-\d{2}).*(>).*$/gm;
+		const regex = /^\s*[-*]\s(\d{4}-\d{2}-\d{2}).*(>).*$/gm;
 
 		// Split markdown content into lines
 		const lines = markdown.split('\n');
@@ -106,6 +115,54 @@ export default class ExpenseTracker extends Plugin {
 		});
 
 		return filteredLines;
+	}
+}
+
+class ExportModal extends Modal {
+	startDate: Date;
+	endDate: Date;
+	onSubmit: (startDate: Date, endDate: Date) => void;
+
+	constructor(app: App, onSubmit: (startDate: Date, endDate: Date) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h1", { text: "Export Ledger entries between which dates?" });
+
+		new Setting(contentEl)
+			.setName("Start Date")
+			.addMomentFormat((el) => {
+				el.setDefaultFormat("YYYY-MM-DD")
+				el.onChange((value) => {
+					this.startDate = new Date(value);
+				})
+			});
+
+		new Setting(contentEl)
+			.setName("End Date")
+			.addMomentFormat((el) => {
+				el.setDefaultFormat("YYYY-MM-DD")
+				el.onChange((value) => {
+					this.endDate = new Date(value);
+				})
+			});
+
+		new Setting(contentEl)
+			.addButton((btn) => btn
+				.setButtonText("Submit")
+				.setCta()
+				.onClick(() => {
+					this.close();
+					this.onSubmit(this.startDate, this.endDate);
+				}));
+	}
+
+	onClose() {
+		let { contentEl } = this;
+		contentEl.empty();
 	}
 }
 
@@ -146,7 +203,7 @@ class ExpenseTrackerSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Currency")
-			.setDesc("The currency that will be used on the ledgers. Can be a symbol (₱) or a code (PHP)")
+			.setDesc("The currency code that will be used on the ledgers. Must be in ISO 4217 format (PHP, USD, etc)")
 			.addText(text => text
 				.setPlaceholder(DEFAULT_SETTINGS.currency)
 				.setValue(this.plugin.settings.currency)
@@ -157,7 +214,7 @@ class ExpenseTrackerSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Timezone")
-			.setDesc("The timezone to use when processing dates")
+			.setDesc("The timezone to use when processing dates. Must be in IANA format (Asia/Manila, America/New_York, etc.)")
 			.addText(text => text
 				.setPlaceholder(DEFAULT_SETTINGS.timezone)
 				.setValue(this.plugin.settings.timezone)

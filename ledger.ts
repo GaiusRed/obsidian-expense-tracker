@@ -4,8 +4,7 @@ import { NParseResult, UserConfig } from 'costflow/lib/interface';
 interface JournalEntry {
     date: Date;
     payee: string;
-    debit: Transaction[];
-    credit: Transaction[];
+    transactions: Transaction[];
     narration: string;
     tags: string[];
     links: string[];
@@ -28,6 +27,8 @@ export default class Ledger {
 
         this.config = {
             mode: "beancount",
+            indent: 4,
+            lineLength: 60,
             currency: currency,
             timezone: timezone,
             account: accounts
@@ -57,8 +58,7 @@ export default class Ledger {
     add(entry: NParseResult.TransactionResult) {
         let journalEntry: JournalEntry = {
             beancount: entry.output as string,
-            credit: [],
-            debit: [],
+            transactions: [],
             date: new Date(entry.date),
             links: entry.links,
             narration: entry.narration,
@@ -66,20 +66,21 @@ export default class Ledger {
             tags: entry.tags
         };
         entry.data.forEach((item: any) => {
-            if (item.amount < 0) {
-                // If the amount is negative, pushing it to 'credit' and making amount positive
-                journalEntry.credit.push({
-                    account: item.account as string,
-                    amount: Math.abs(item.amount)
-                });
-            } else {
-                // If the amount is positive, pushing it to 'debit'
-                journalEntry.debit.push({
-                    account: item.account as string,
-                    amount: item.amount as number
-                });
-            }
+            journalEntry.transactions.push({
+                account: item.account as string,
+                amount: item.amount as number
+            });
         });
         this.journalEntries.push(journalEntry);
+    }
+
+    export(startDate: Date, endDate: Date): string {
+        let beancount: string = "";
+        this.journalEntries.forEach(entry => {
+            if ((entry.date >= startDate) && (entry.date <= endDate)) {
+                beancount += entry.beancount + "\n\n";
+            }
+        });
+        return beancount;
     }
 }
