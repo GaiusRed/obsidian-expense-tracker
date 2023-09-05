@@ -32,7 +32,7 @@ export default class ExpenseTracker extends Plugin {
 		this.addCommand({
 			id: 'refresh-ledger',
 			name: 'Manually Refresh the Ledger',
-			editorCallback: async (editor: Editor) => {
+			callback: async () => {
 				this.refreshLedger();
 			}
 		});
