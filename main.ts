@@ -1,4 +1,19 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import costflow from 'costflow';
+import { NParseResult, UserConfig } from 'costflow/lib/interface';
+
+const config: UserConfig = {
+	mode: "beancount",
+	currency: "PHP",
+	timezone: "Asia/Manila",
+	account: {
+		visa: "Liabilities:Visa",
+		music: "Expenses:Music",
+	},
+	formula: {
+		spotify: "@Spotify #music 15.98 USD visa > music",
+	},
+};
 
 // Remember to rename these classes and interfaces!
 
@@ -15,6 +30,18 @@ export default class MyPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+
+		this.addCommand({
+			id: 'test-costflow',
+			name: 'DEBUG Test Costflow',
+			editorCallback: async (editor: Editor) => {
+				const line = editor.getLine(editor.getCursor().line);
+				const parsed = <NParseResult.Result>await costflow.parse(line, config);
+				//new Notice(JSON.stringify(parsed.data));
+				editor.replaceRange("\n\n---\n" + parsed.output as string, editor.getCursor())
+				editor.setCursor(editor.lastLine());
+			}
+		});
 
 		// This creates an icon in the left ribbon.
 		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
@@ -97,12 +124,12 @@ class SampleModal extends Modal {
 	}
 
 	onOpen() {
-		const {contentEl} = this;
+		const { contentEl } = this;
 		contentEl.setText('Woah!');
 	}
 
 	onClose() {
-		const {contentEl} = this;
+		const { contentEl } = this;
 		contentEl.empty();
 	}
 }
@@ -116,7 +143,7 @@ class SampleSettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 
 		containerEl.empty();
 
