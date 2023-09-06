@@ -14,7 +14,7 @@ const DEFAULT_SETTINGS: ExpenseTrackerSettings = {
 	refreshInterval: 15,
 	currency: "PHP",
 	timezone: "Asia/Manila",
-	accounts: "start = Equity:Starting Balance\ncash = Assets:Cash\nsavings = Assets:Debit Card\nfood = Expenses:Needs:Food\nrent = Expenses:Needs:Bills\nstreaming = Expenses:Wants:Bills\ncc = Liabilities:Credit Card\nwages = Income:Salary"
+	accounts: "start = Equity:Starting Balance\na = Assets\nl = Liabilities\nx = Expenses\ni = Income\nw = Expenses:Wants\nn = Expenses:Needs"
 }
 
 export default class ExpenseTracker extends Plugin {
@@ -191,7 +191,7 @@ class ExpenseTrackerSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Refresh Interval")
-			.setDesc("Number of seconds before your vault is scanned and its ledgers processed. (Requires Obsidian reboot)")
+			.setDesc("Number of seconds before your vault is scanned and its ledgers processed.")
 			.addSlider(slider => slider
 				.setDynamicTooltip()
 				.setLimits(3, 30, 1)
@@ -225,12 +225,17 @@ class ExpenseTrackerSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Account Aliases")
-			.setDesc("A list of aliases to use as shorthand for accounts")
+			.setDesc("A list of aliases to use as shorthand for accounts. Note: This is case sensitive.")
 			.addTextArea(text => text
 				.setValue(this.plugin.settings.accounts)
 				.onChange(async (value) => {
 					this.plugin.settings.accounts = value;
 					await this.plugin.saveSettings()
 				}));
+
+		containerEl
+			.createEl("p", { text: "In personal accounting, it's important to separate acconts into at least four categories: ASSETS to represent what you own, LIABILITIES to represent what you owe to others, INCOME which represents money that comes to your possession (like salary/wages) and EXPENSES which represents money you pay to others." });
+		containerEl
+			.createEl("p", { text: "This plugin's default Account Aliases represent these categories, along with two others that are useful to track: splitting EXPENSES to Wants and Needs. Of course, these are just suggestions, and feel free to customize your ledger as you see fit. Good luck!" });
 	}
 }

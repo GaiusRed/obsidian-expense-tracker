@@ -37,8 +37,16 @@ export default class Ledger {
     }
 
     async parseFiles(lines: string[]) {
+        const keys = Object.keys(this.config.account as Record<string, string>);
         lines.forEach(async line => {
-            let result = await costflow.parse(line, this.config);
+            let lineToParse: string = line;
+            // Apply Account Aliases
+            keys.forEach(key => {
+                let regex = new RegExp(key + ":", "g")
+                lineToParse = lineToParse.replace(regex, (this.config.account as Record<string, string>)[key] + ":")
+            });
+            // Parse the line
+            let result = await costflow.parse(lineToParse, this.config);
             if (this.isTransactionResult(result)) {
                 this.add(result as NParseResult.TransactionResult);
             }
