@@ -42,7 +42,7 @@ export default class Ledger {
             let lineToParse: string = line;
             // Apply Account Aliases
             keys.forEach(key => {
-                let regex = new RegExp(key + ":", "g")
+                let regex = new RegExp("\\b" + key + ":", "g")
                 lineToParse = lineToParse.replace(regex, (this.config.account as Record<string, string>)[key] + ":")
             });
             // Parse the line
